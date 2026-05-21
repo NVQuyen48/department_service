@@ -1,3 +1,5 @@
+name: CI/CD
+
 on:
   push:
     branches:
@@ -5,20 +7,21 @@ on:
 
 jobs:
   build:
-    runs-on: [self-hosted]
+    runs-on: self-hosted
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Build mvn
+      - name: Build Maven
         run: |
+          cd department-service
           mvn clean package -DskipTests
 
-      - name: Build and tag Docker image
+      - name: Build Docker image
         run: |
+          cd department-service
           docker build -t department-service:v1 .
-
 
   deploy:
     env:
@@ -26,13 +29,21 @@ jobs:
       DB_URL: ${{ secrets.DB_URL }}
       DB_USERNAME: ${{ secrets.DB_USERNAME }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-    runs-on: [self-hosted]
+
+    runs-on: self-hosted
     needs: build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
 
     steps:
-      - name: Stop and Remove Existing Containers
-        run: docker compose down || true  # Ignore errors if no containers are running
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Run with Docker Compose
-        run: docker compose up -d
+      - name: Stop existing containers
+        run: |
+          cd department-service
+          docker compose down || true
+
+      - name: Run Docker Compose
+        run: |
+          cd department-service
+          docker compose up -d --build
