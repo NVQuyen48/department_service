@@ -1,49 +1,169 @@
-name: CI/CD
+name: Build and Deploy
 
 on:
   push:
     branches:
-      - master
+      - develop
+      - production
 
 jobs:
-  build:
-    runs-on: self-hosted
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+  deploy-develop:
+    runs-on: [self-hosted]
 
-      - name: Build Maven
-        run: |
-          cd department-service
-          mvn clean package -DskipTests
+    if: github.ref == 'refs/heads/develop'
 
-      - name: Build Docker image
-        run: |
-          cd department-service
-          docker build -t department-service:v1 .
+    environment: develop
 
-  deploy:
     env:
+      IMAGE_NAME: department-service
+      IMAGE_TAG: ${{ github.sha }}
+
+      MYSQL_ROOT_PASSWORD: ${{ vars.MYSQL_ROOT_PASSWORD }}
+      MYSQL_DATABASE: ${{ vars.MYSQL_DATABASE }}
+      MYSQL_USER: ${{ vars.MYSQL_USER }}
+      MYSQL_PASSWORD: ${{ vars.MYSQL_PASSWORD }}
+
       APP_PORT: ${{ secrets.APP_PORT }}
       DB_URL: ${{ secrets.DB_URL }}
       DB_USERNAME: ${{ secrets.DB_USERNAME }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
-    runs-on: self-hosted
-    needs: build
-    if: github.ref == 'refs/heads/master'
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
 
-      - name: Stop existing containers
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+#      - name: Setup Java 17
+#        uses: actions/setup-java@v4
+#        with:
+#          distribution: temurin
+#          java-version: '17'
+
+      - name: Build Maven
+        shell: powershell
         run: |
-          cd department-service
-          docker compose down || true
+          mvn clean package -DskipTests
+
+      - name: Build Docker image
+        shell: powershell
+        run: |
+          docker build -t "${env:IMAGE_NAME}:${env:IMAGE_TAG}" .
+
+      - name: Stop old containers
+        shell: powershell
+        run: |
+          docker compose down
+
+
+
+      - name: Check develop env
+        shell: powershell
+        run: |
+          Write-Host "IMAGE_NAME=$env:IMAGE_NAME"
+          Write-Host "IMAGE_TAG=$env:IMAGE_TAG"
+          Write-Host "APP_PORT=$env:APP_PORT"
+          Write-Host "MYSQL_DATABASE=$env:MYSQL_DATABASE"
+          Write-Host "DB_URL exists:" ($env:DB_URL -ne "")
 
       - name: Run Docker Compose
+        shell: powershell
         run: |
-          cd department-service
-          docker compose up -d --build
+          docker compose up -d
+
+      - name: Show running containers
+        shell: powershell
+        run: |
+          docker ps
+
+
+  deploy-production:
+    runs-on: [self-hosted]
+
+    if: github.ref == 'refs/heads/production'
+
+    environment: production
+
+    env:
+      IMAGE_NAME: department-service
+      IMAGE_TAG: ${{ github.sha }}
+
+      APP_PORT: ${{ secrets.APP_PORT }}
+      DB_URL: ${{ secrets.DB_URL }}
+      DB_USERNAME: ${{ secrets.DB_USERNAME }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+
+    steps:
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Build Maven
+        shell: powershell
+        run: |
+          mvn clean package -DskipTests
+
+      - name: Build Docker image
+        shell: powershell
+        run: |
+          docker build -t "${env:IMAGE_NAME}:${env:IMAGE_TAG}" .
+
+      - name: Check Minikube
+        shell: powershell
+        run: |
+          & "C:\Program Files\Kubernetes\Minikube\minikube.exe" status 
+          kubectl get nodes
+       #   & "C:\minikube\minikube.exe" status kubectl get nodes
+
+      - name: Load image into Minikube
+        shell: powershell
+        run: |
+          & "C:\Program Files\Kubernetes\Minikube\minikube.exe" image load "${env:IMAGE_NAME}:${env:IMAGE_TAG}"
+#          & "C:\minikube\minikube.exe" image load "${env:IMAGE_NAME}:${env:IMAGE_TAG}"
+
+      - name: Create or update Kubernetes secret
+        shell: powershell
+        run: |
+          kubectl create secret generic department-service-secret `
+            --from-literal=APP_PORT="$env:APP_PORT" `
+            --from-literal=DB_URL="$env:DB_URL" `
+            --from-literal=DB_USERNAME="$env:DB_USERNAME" `
+            --from-literal=DB_PASSWORD="$env:DB_PASSWORD" `
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Render Kubernetes manifests
+        shell: powershell
+        run: |
+          (Get-Content k8s/deployment.yaml) `
+            -replace '\${IMAGE_NAME}', "$env:IMAGE_NAME" `
+            -replace '\${IMAGE_TAG}', "$env:IMAGE_TAG" `
+            -replace '\${APP_PORT}', "$env:APP_PORT" `
+            | Set-Content k8s/deployment-rendered.yaml
+
+          (Get-Content k8s/service.yaml) `
+            -replace '\${APP_PORT}', "$env:APP_PORT" `
+            | Set-Content k8s/service-rendered.yaml
+
+      - name: Deploy to Minikube
+        shell: powershell
+        run: |
+          kubectl apply -f k8s/deployment-rendered.yaml
+          kubectl apply -f k8s/service-rendered.yaml
+
+      - name: Restart deployment
+        shell: powershell
+        run: |
+          kubectl rollout restart deployment/department-service
+          kubectl rollout status deployment/department-service
