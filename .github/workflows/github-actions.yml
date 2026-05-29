@@ -123,15 +123,13 @@ jobs:
       - name: Check Minikube
         shell: powershell
         run: |
-          & "C:\Program Files\Kubernetes\Minikube\minikube.exe" status 
+          & "C:\ProgramData\chocolatey\bin\minikube.exe" status
           kubectl get nodes
-       #   & "C:\minikube\minikube.exe" status kubectl get nodes
 
       - name: Load image into Minikube
         shell: powershell
         run: |
-          & "C:\Program Files\Kubernetes\Minikube\minikube.exe" image load "${env:IMAGE_NAME}:${env:IMAGE_TAG}"
-#          & "C:\minikube\minikube.exe" image load "${env:IMAGE_NAME}:${env:IMAGE_TAG}"
+          & "C:\ProgramData\chocolatey\bin\minikube.exe" image load "${env:IMAGE_NAME}:${env:IMAGE_TAG}"
 
       - name: Create or update Kubernetes secret
         shell: powershell
