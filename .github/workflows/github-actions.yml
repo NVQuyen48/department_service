@@ -59,9 +59,9 @@ jobs:
       - name: Stop old containers
         shell: powershell
         run: |
-          docker compose stop department-service
-          docker compose rm -f department-service
-#          docker compose down
+#          docker compose stop department-service
+#          docker compose rm -f department-service
+          docker compose down
 
       - name: Check develop env
         shell: powershell
